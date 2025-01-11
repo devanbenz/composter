@@ -1,13 +1,10 @@
-/// [Replacer] implements the page replacement policy. This is a custom-built
-/// replacer algorithm that takes inspiration from second chance
-/// algorithms. It uses a bitmask to check for eviction.
-///
-/// Given a replacer size of N
+/// [Replacer] implements the page replacement policy.
+/// CLOCK is used for this eviction policy.
 struct Replacer<T> {
     size: usize,
-    curr_size: usize,
     node_store: Vec<Option<ReplacerNode<T>>>,
-    set_bitmask: usize,
+    ref_bits: Vec<bool>,
+    ref_pos: usize,
 }
 
 struct ReplacerNode<T> {
@@ -18,9 +15,9 @@ impl<T> Replacer<T> {
     pub fn new(size: usize) -> Self {
         Self {
             size,
-            curr_size: 0,
             node_store: vec![None; size],
-            set_bitmask: 0,
+            ref_bits: vec![false; size],
+            ref_pos: 0,
         }
     }
 
@@ -28,7 +25,13 @@ impl<T> Replacer<T> {
 
     pub fn current_size(&self) -> usize { self.size }
 
-    pub fn record_access(&mut self, node: T) {}
+    pub fn record_access(&mut self, node: T) {
+        for (page, i) in self.node_store.iter().enumerate() {
+            if page.is_some_and(|node| node.data == node) {
+                self.ref_bits[]
+            }
+        }
+    }
 
     pub fn evict(&mut self) {}
 
@@ -44,6 +47,5 @@ mod tests {
     #[test]
     fn test_replacer_simple() {
         let mut p = Replacer::<u8>::new(5);
-
     }
 }
