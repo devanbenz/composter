@@ -133,22 +133,23 @@ mod tests {
         assert_eq!(p.ref_bits, vec![true, true, true, true, true]);
 
         assert_eq!(p.get(20), 20);
-        assert_eq!(p.ref_bits, vec![false, true, true, true, true]);
+        assert_eq!(p.ref_bits, vec![false, false, false, false, false]);
         assert_eq!(p.get(21), 21);
-        assert_eq!(p.ref_bits, vec![false, false, true, true, true]);
+        assert_eq!(p.ref_bits, vec![false, false, false, false, false]);
         assert_eq!(p.get(22), 22);
-        assert_eq!(p.ref_bits, vec![false, false, false, true, true]);
+        assert_eq!(p.ref_bits, vec![false, false, false, false, false]);
         assert_eq!(p.get(21), 21);
-        assert_eq!(p.ref_bits, vec![false, true, false, true, true]);
+        assert_eq!(p.ref_bits, vec![false, true, false, false, false]);
         assert_eq!(
             p.node_store,
             vec![Some(20), Some(21), Some(22), Some(11), Some(12)]
         );
         assert_eq!(p.get(23), 23);
-        assert_eq!(p.ref_bits, vec![false, true, false, true, true]);
+        assert_eq!(p.ref_bits, vec![false, false, false, false, false]);
+        // ref_bit is set to 2 for the pointer
         assert_eq!(
             p.node_store,
-            vec![Some(23), Some(21), Some(22), Some(11), Some(12)]
+            vec![Some(20), Some(21), Some(23), Some(11), Some(12)]
         );
     }
 }
