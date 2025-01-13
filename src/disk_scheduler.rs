@@ -1,46 +1,45 @@
-use std::future::Future;
-use std::marker::PhantomData;
-use std::sync::mpsc;
-use std::sync::mpsc::{Receiver, Sender};
 use crate::disk_manager::{DiskManager, DiskRequest};
+use std::sync::mpsc;
+use std::sync::mpsc::{Receiver, Sender, TryRecvError};
 
 /// [DiskScheduler] implements a IO scheduler for reading and writing
 /// from disk in to memory.
 pub struct DiskScheduler {
     /// channel is used a queue for disk reads and writes to be processed
-    channel: (Sender<Option<DiskRequest>>, Receiver<Option<DiskRequest>>),
-    /// disk_manager
-    disk_manager: DiskManager,
+    sender: Sender<DiskRequest>,
 }
 
 impl DiskScheduler {
     pub fn new(disk_manager: DiskManager) -> Self {
-        let channel: (Sender<Option<DiskRequest>>, Receiver<Option<DiskRequest>>) = mpsc::channel();
-        Self {
-            channel,
-            disk_manager,
-        }
+        let (tx, rx) = mpsc::channel();
+        Self::spawn_worker(rx, disk_manager);
+        Self { sender: tx }
     }
 
-    pub fn spawn_worker(&self) -> std::thread::JoinHandle<()> {
-        let (tx, rw) = self.channel.clone();
-        std::thread::spawn(|| {
-            while let Ok(r) = rw.recv() {
-                match r {
-                    None => {}
-                    Some(disk_request) => {
-                        if disk_request.is_write {
-                            self.disk_manager.write_page(disk_request);
-                        } else {
-                            self.disk_manager.write_page(disk_request);
-                        }
+    pub fn spawn_worker(
+        receiver: Receiver<DiskRequest>,
+        disk_manager: DiskManager,
+    ) -> std::thread::JoinHandle<()> {
+        std::thread::spawn(move || loop {
+            match receiver.try_recv() {
+                Ok(req) => {
+                    if req.is_write {
+                        disk_manager.write_page(req);
+                    } else {
+                        disk_manager.read_page(req);
                     }
+                }
+                Err(TryRecvError::Empty) => {
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+                Err(TryRecvError::Disconnected) => {
+                    break;
                 }
             }
         })
     }
 
-    pub fn schedule_io(&self, disk_request: DiskRequest) {
-        self.channel.0.send(Some(disk_request)).unwrap();
+    pub fn request(&self, request: DiskRequest) -> Result<(), mpsc::SendError<DiskRequest>> {
+        self.sender.send(request)
     }
 }

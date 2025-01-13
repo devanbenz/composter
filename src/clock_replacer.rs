@@ -1,6 +1,6 @@
 /// [Replacer] implements the page replacement policy.
 /// CLOCK is used for this eviction policy.
-struct Replacer<T> {
+pub struct Replacer<T> {
     size: usize,
     node_store: Vec<Option<T>>,
     ref_bits: Vec<bool>,
