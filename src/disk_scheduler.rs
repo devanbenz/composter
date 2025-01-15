@@ -43,3 +43,45 @@ impl DiskScheduler {
         self.sender.send(request)
     }
 }
+
+mod tests {
+    use std::path::PathBuf;
+    use super::*;
+    #[test]
+    fn test_disk_scheduler() {
+        let mut counter = 0;
+        let (tx, rx) = mpsc::channel();
+        let dm = DiskManager::new(
+            4096,
+            Some(PathBuf::from(
+                "/Users/devan/Documents/Projects/composter/scratch_page/sample.db",
+            )),
+            false,
+        );
+        let ds = DiskScheduler::new(dm);
+
+        let b = std::thread::spawn(move || {
+            for i in 0..10 {
+                ds.request(DiskRequest {
+                    is_write: false,
+                    data: vec![],
+                    page_id: i,
+                    callback: tx.clone(),
+                })
+                    .unwrap();
+            }
+        });
+
+        let a = std::thread::spawn(move || {
+            while let Ok(val) = rx.recv() {
+                assert_eq!(val, true);
+                counter = counter + 1;
+            }
+        });
+
+        b.join().unwrap();
+        a.join().unwrap();
+
+        assert_eq!(counter, 10);
+    }
+}

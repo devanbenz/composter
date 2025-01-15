@@ -7,12 +7,17 @@ use std::sync::atomic::AtomicU64;
 struct Frame {
     buffer: Vec<u8>,
     pin_count: AtomicU64,
-    current_page_index: usize,
-    
+    current_page_index: Option<usize>,
+}
+
+impl Frame {
+    fn new(page_size: usize) -> Self {
+        let buffer = vec![0; page_size];
+        Self { buffer, pin_count: AtomicU64::new(0), current_page_index: None }
+    }
 }
 
 struct BufferPoolManager {
-    disk_manager: DiskManager,
     disk_scheduler: DiskScheduler,
     page_table: HashMap<usize, usize>,
     free_list: Vec<usize>,
@@ -23,18 +28,17 @@ struct BufferPoolManager {
 
 impl BufferPoolManager {
     pub fn new(
-        disk_manager: DiskManager,
         disk_scheduler: DiskScheduler,
         replacer: Replacer<usize>,
+        page_size: usize,
         num_frames: usize,
     ) -> BufferPoolManager {
         let page_table = HashMap::new();
-        let free_list = Vec::new();
         let current_page_index = AtomicU64::new(0);
-        let frames = Vec::new();
+        let frames = (0..num_frames).map(|_| Frame::new(page_size)).collect();
+        let free_list = (0..num_frames).map(|v| v).collect();
 
         BufferPoolManager {
-            disk_manager,
             disk_scheduler,
             page_table,
             free_list,
@@ -43,6 +47,28 @@ impl BufferPoolManager {
             frames,
         }
     }
-    
-    pub fn checked_read_page(page_id: usize) -> Option<>
+
+    pub fn read_page() {
+        unimplemented!()
+    }
+
+    pub fn write_page() {
+        unimplemented!()
+    }
+}
+
+mod tests {
+    use crate::DEFAULT_PAGE_SIZE;
+    use super::*;
+    #[test]
+    fn new_buffer_pool_manager() {
+        let disk_manager = DiskManager::default();
+        let disk_scheduler = DiskScheduler::new(disk_manager);
+        let replacer = Replacer::new(10);
+        let buffer_pool_manager = BufferPoolManager::new(disk_scheduler, replacer, DEFAULT_PAGE_SIZE, 10);
+
+        assert_eq!(buffer_pool_manager.page_table.len(), 0);
+        assert_eq!(buffer_pool_manager.free_list.len(), 10);
+        assert_eq!(buffer_pool_manager.frames.len(), 10);
+    }
 }

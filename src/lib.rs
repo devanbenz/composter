@@ -4,5 +4,4 @@ pub mod disk_manager;
 pub mod disk_scheduler;
 mod page;
 
-#[cfg(test)]
-mod tests {}
+const DEFAULT_PAGE_SIZE: usize = 4096;
