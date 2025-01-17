@@ -45,19 +45,13 @@ impl DiskScheduler {
 }
 
 mod tests {
-    use std::path::PathBuf;
     use super::*;
+    use std::path::PathBuf;
     #[test]
     fn test_disk_scheduler() {
         let mut counter = 0;
         let (tx, rx) = mpsc::channel();
-        let dm = DiskManager::new(
-            4096,
-            Some(PathBuf::from(
-                "/Users/devan/Documents/Projects/composter/scratch_page/sample.db",
-            )),
-            false,
-        );
+        let dm = DiskManager::new(4096, None, true);
         let ds = DiskScheduler::new(dm);
 
         let b = std::thread::spawn(move || {
@@ -68,7 +62,7 @@ mod tests {
                     page_id: i,
                     callback: tx.clone(),
                 })
-                    .unwrap();
+                .unwrap();
             }
         });
 
