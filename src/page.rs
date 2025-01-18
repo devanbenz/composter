@@ -61,7 +61,7 @@ impl Pages {
             .expect("Couldn't open page");
 
         let page_directory = PageDirectory::new();
-        let mut pages = Vec::new();
+        let pages = Vec::new();
         let pages = Pages {
             page_directory,
             pages,

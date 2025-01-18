@@ -13,7 +13,11 @@ struct Frame {
 impl Frame {
     fn new(page_size: usize) -> Self {
         let buffer = vec![0; page_size];
-        Self { buffer, pin_count: AtomicU64::new(0), current_page_index: None }
+        Self {
+            buffer,
+            pin_count: AtomicU64::new(0),
+            current_page_index: None,
+        }
     }
 }
 
@@ -36,7 +40,7 @@ impl BufferPoolManager {
         let page_table = HashMap::new();
         let current_page_index = AtomicU64::new(0);
         let frames = (0..num_frames).map(|_| Frame::new(page_size)).collect();
-        let free_list = (0..num_frames).map(|v| v).collect();
+        let free_list = (0..num_frames).collect();
 
         BufferPoolManager {
             disk_scheduler,
@@ -58,14 +62,15 @@ impl BufferPoolManager {
 }
 
 mod tests {
-    use crate::DEFAULT_PAGE_SIZE;
     use super::*;
+    use crate::DEFAULT_PAGE_SIZE;
     #[test]
     fn new_buffer_pool_manager() {
         let disk_manager = DiskManager::default();
         let disk_scheduler = DiskScheduler::new(disk_manager);
         let replacer = Replacer::new(10);
-        let buffer_pool_manager = BufferPoolManager::new(disk_scheduler, replacer, DEFAULT_PAGE_SIZE, 10);
+        let buffer_pool_manager =
+            BufferPoolManager::new(disk_scheduler, replacer, DEFAULT_PAGE_SIZE, 10);
 
         assert_eq!(buffer_pool_manager.page_table.len(), 0);
         assert_eq!(buffer_pool_manager.free_list.len(), 10);
