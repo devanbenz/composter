@@ -1,4 +1,4 @@
-use crate::disk_manager::{DiskManager, DiskRequest};
+use crate::disk_manager::{DiskManager, DiskManagerRequest, DiskRequest};
 use std::sync::mpsc;
 use std::sync::mpsc::{Receiver, Sender, TryRecvError};
 
@@ -6,7 +6,7 @@ use std::sync::mpsc::{Receiver, Sender, TryRecvError};
 /// from disk in to memory.
 pub struct DiskScheduler {
     /// channel is used a queue for disk reads and writes to be processed
-    sender: Sender<DiskRequest>,
+    sender: Sender<DiskManagerRequest>,
 }
 
 impl DiskScheduler {
@@ -17,18 +17,22 @@ impl DiskScheduler {
     }
 
     pub fn spawn_worker(
-        receiver: Receiver<DiskRequest>,
-        disk_manager: DiskManager,
+        receiver: Receiver<DiskManagerRequest>,
+        mut disk_manager: DiskManager,
     ) -> std::thread::JoinHandle<()> {
         std::thread::spawn(move || loop {
             match receiver.try_recv() {
-                Ok(req) => {
-                    if req.is_write {
-                        disk_manager.write_page(req);
-                    } else {
-                        disk_manager.read_page(req);
+                Ok(req) => match req {
+                    DiskManagerRequest::DiskRwRequest(req) => {
+                        if req.is_write {
+                            disk_manager.write_page(req);
+                        } else {
+                            disk_manager.read_page(req);
+                        }
                     }
-                }
+                    DiskManagerRequest::DiskIncreaseRequest(size) => {}
+                    DiskManagerRequest::DiskDecreaseRequest(size) => {}
+                },
                 Err(TryRecvError::Empty) => {
                     std::thread::sleep(std::time::Duration::from_millis(10));
                 }
@@ -39,8 +43,24 @@ impl DiskScheduler {
         })
     }
 
-    pub fn request(&self, request: DiskRequest) -> Result<(), mpsc::SendError<DiskRequest>> {
-        self.sender.send(request)
+    pub fn increase_size(
+        &mut self,
+        size: usize,
+    ) -> Result<(), mpsc::SendError<DiskManagerRequest>> {
+        self.sender
+            .send(DiskManagerRequest::DiskIncreaseRequest(size))
+    }
+
+    pub fn decrease_size(
+        &mut self,
+        size: usize,
+    ) -> Result<(), mpsc::SendError<DiskManagerRequest>> {
+        self.sender
+            .send(DiskManagerRequest::DiskDecreaseRequest(size))
+    }
+
+    pub fn request(&self, request: DiskRequest) -> Result<(), mpsc::SendError<DiskManagerRequest>> {
+        self.sender.send(DiskManagerRequest::DiskRwRequest(request))
     }
 }
 
