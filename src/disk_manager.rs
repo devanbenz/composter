@@ -1,6 +1,6 @@
 use crate::DEFAULT_PAGE_SIZE;
 use std::fs::{File, OpenOptions};
-use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
+use std::io::{BufRead, BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 use std::path::PathBuf;
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
@@ -72,7 +72,7 @@ impl DiskManager {
                 }
             }
         } else {
-            match self.write_disk(page_id) {
+            match self.write_disk(page_id, data) {
                 Ok(_) => {
                     is_okay = true;
                 }
@@ -140,7 +140,10 @@ impl DiskManager {
         Ok(())
     }
 
-    fn write_disk(&self, p_id: usize) -> Result<(), std::io::Error> {
+    fn write_disk(&self, p_id: usize, p_data: &mut Vec<u8>) -> Result<(), std::io::Error> {
+        let mut buf_writer = BufWriter::new(self.file_handle.as_ref().unwrap());
+        buf_writer.seek(SeekFrom::Start(((p_id - 1) * self.page_size) as u64))?;
+        buf_writer.write_all(p_data)?;
         Ok(())
     }
 
@@ -216,10 +219,22 @@ mod tests {
         // Blank page
         let mut v_test: Vec<u8> = vec![0; DEFAULT_PAGE_SIZE];
         dm.increase_pages(1);
-        dm.read_page(&mut v_test, 1, tx);
+        dm.read_page(&mut v_test, 1, tx.clone());
 
         let recv = rx.recv().unwrap();
         assert!(recv);
+        assert_eq!(v_test, vec![0; DEFAULT_PAGE_SIZE]);
+
+        let mut data = vec![u8::try_from('a').unwrap(); DEFAULT_PAGE_SIZE];
+        dm.write_page(&mut data, 1, tx.clone());
+        let recv = rx.recv().unwrap();
+        assert!(recv);
+
+        dm.read_page(&mut v_test, 1, tx.clone());
+        let recv = rx.recv().unwrap();
+        assert!(recv);
+
+        assert_eq!(v_test, data);
 
         drop(dm);
         temp_dir.close().unwrap();
