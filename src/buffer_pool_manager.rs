@@ -64,9 +64,10 @@ impl BufferPoolManager {
 mod tests {
     use super::*;
     use crate::DEFAULT_PAGE_SIZE;
+    use std::sync::{Arc, Mutex};
     #[test]
     fn new_buffer_pool_manager() {
-        let disk_manager = DiskManager::default();
+        let disk_manager = Arc::new(Mutex::new(DiskManager::default()));
         let disk_scheduler = DiskScheduler::new(disk_manager);
         let replacer = Replacer::new(10);
         let buffer_pool_manager =
