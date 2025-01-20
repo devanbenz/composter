@@ -1,19 +1,17 @@
 use crate::DEFAULT_PAGE_SIZE;
 use std::fs::{File, OpenOptions};
+use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::PathBuf;
 use std::sync::mpsc::Sender;
+use std::sync::{Arc, Mutex};
 
 pub enum DiskManagerRequest {
-    DiskRwRequest(DiskRequest),
-    DiskIncreaseRequest(usize),
-    DiskDecreaseRequest(usize),
-}
-
-pub struct DiskRequest {
-    pub is_write: bool,
-    pub data: Vec<u8>,
-    pub page_id: usize,
-    pub callback: Sender<bool>,
+    DiskRwRequest {
+        is_write: bool,
+        data: Arc<Mutex<Vec<u8>>>,
+        page_id: usize,
+        callback: Sender<bool>,
+    },
 }
 
 pub struct DiskManager {
@@ -62,10 +60,10 @@ impl DiskManager {
         }
     }
 
-    pub fn write_page(&mut self, request: DiskRequest) {
+    pub fn write_page(&mut self, data: &mut Vec<u8>, page_id: usize, callback: Sender<bool>) {
         let mut is_okay = true;
         if self.in_memory {
-            match self.write_in_memory(request.page_id, request.data) {
+            match self.write_in_memory(page_id, data) {
                 Ok(_) => {
                     is_okay = true;
                 }
@@ -74,7 +72,7 @@ impl DiskManager {
                 }
             }
         } else {
-            match self.write_disk(request.page_id) {
+            match self.write_disk(page_id) {
                 Ok(_) => {
                     is_okay = true;
                 }
@@ -83,16 +81,14 @@ impl DiskManager {
                 }
             }
         }
-        request
-            .callback
-            .send(is_okay)
-            .expect("failed to send to channel");
+
+        callback.send(is_okay).expect("failed to send to channel");
     }
 
-    pub fn read_page(&self, request: DiskRequest) {
+    pub fn read_page(&mut self, data: &mut Vec<u8>, page_id: usize, callback: Sender<bool>) {
         let mut is_okay = true;
         if self.in_memory {
-            match self.read_in_memory(request.page_id) {
+            match self.read_in_memory(page_id, data) {
                 Ok(_) => {
                     is_okay = true;
                 }
@@ -101,7 +97,7 @@ impl DiskManager {
                 }
             }
         } else {
-            match self.read_disk(request.page_id) {
+            match self.read_disk(page_id, data) {
                 Ok(_) => {
                     is_okay = true;
                 }
@@ -110,10 +106,8 @@ impl DiskManager {
                 }
             }
         }
-        request
-            .callback
-            .send(is_okay)
-            .expect("failed to send to channel");
+
+        callback.send(is_okay).expect("failed to send to channel");
     }
 
     pub fn increase_pages(&mut self, p_id: usize) {
@@ -130,11 +124,19 @@ impl DiskManager {
         unimplemented!()
     }
 
-    fn write_in_memory(&mut self, p_id: usize, p_data: Vec<u8>) -> Result<(), std::io::Error> {
-        let pages = self.in_memory_pages.as_mut().unwrap();
-        let offset = p_id * self.page_size;
+    fn write_in_memory(&mut self, p_id: usize, p_data: &mut Vec<u8>) -> Result<(), std::io::Error> {
+        let pages = match &mut self.in_memory_pages {
+            None => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "no pages available",
+                ));
+            }
+            Some(pages) => pages,
+        };
 
-        pages[offset..self.page_size].copy_from_slice(&p_data[offset..self.page_size]);
+        let offset = (p_id - 1) * self.page_size;
+        pages[offset..self.page_size].copy_from_slice(&p_data);
         Ok(())
     }
 
@@ -142,11 +144,27 @@ impl DiskManager {
         Ok(())
     }
 
-    fn read_in_memory(&self, p_id: usize) -> Result<(), std::io::Error> {
+    fn read_in_memory(&mut self, p_id: usize, p_data: &mut Vec<u8>) -> Result<(), std::io::Error> {
+        let pages = match &mut self.in_memory_pages {
+            None => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "no pages available",
+                ));
+            }
+            Some(pages) => pages,
+        };
+
+        let offset = (p_id - 1) * self.page_size;
+        p_data.copy_from_slice(&pages[offset..self.page_size]);
         Ok(())
     }
 
-    fn read_disk(&self, p_id: usize) -> Result<(), std::io::Error> {
+    fn read_disk(&self, p_id: usize, p_data: &mut Vec<u8>) -> Result<(), std::io::Error> {
+        let mut buf_reader = BufReader::new(self.file_handle.as_ref().unwrap());
+        buf_reader.seek(SeekFrom::Start(((p_id - 1) * self.page_size) as u64))?;
+        buf_reader.read_exact(p_data)?;
+
         Ok(())
     }
 
@@ -162,8 +180,9 @@ impl DiskManager {
 
 mod tests {
     use super::*;
+    use tempdir::TempDir;
     #[test]
-    fn test_disk_manager() {
+    fn test_disk_manager_in_memory() {
         let mut dm = DiskManager::default();
         assert_eq!(dm.page_size, DEFAULT_PAGE_SIZE);
         assert_eq!(dm.page_dir, None);
@@ -175,9 +194,34 @@ mod tests {
         dm.increase_pages(1);
         assert_eq!(dm.in_memory_pages, Some(v_test));
 
-        let v_test: Vec<u8> = vec![u8::try_from('a').unwrap(); DEFAULT_PAGE_SIZE];
-        dm.write_in_memory(1, v_test.clone()).unwrap();
-
+        let mut v_test: Vec<u8> = vec![u8::try_from('a').unwrap(); DEFAULT_PAGE_SIZE];
+        dm.write_in_memory(1, &mut v_test).unwrap();
         assert_eq!(dm.in_memory_pages, Some(v_test));
+
+        let mut v_test: Vec<u8> = vec![0; DEFAULT_PAGE_SIZE];
+        dm.read_in_memory(1, &mut v_test).unwrap();
+        assert_eq!(dm.in_memory_pages, Some(v_test));
+    }
+
+    #[test]
+    fn test_disk_manager_on_disk() {
+        let temp_dir = TempDir::new("test_disk_manager").unwrap();
+        let temp_file = temp_dir.path().join("test.db");
+        let (tx, rx) = std::sync::mpsc::channel();
+
+        let mut dm = DiskManager::new(DEFAULT_PAGE_SIZE, Some(temp_file), false);
+        assert_eq!(dm.page_size, DEFAULT_PAGE_SIZE);
+        assert!(!dm.in_memory);
+
+        // Blank page
+        let mut v_test: Vec<u8> = vec![0; DEFAULT_PAGE_SIZE];
+        dm.increase_pages(1);
+        dm.read_page(&mut v_test, 1, tx);
+
+        let recv = rx.recv().unwrap();
+        assert!(recv);
+
+        drop(dm);
+        temp_dir.close().unwrap();
     }
 }
