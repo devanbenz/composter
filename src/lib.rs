@@ -1,6 +1,6 @@
 pub mod buffer_pool_manager;
-pub mod clock_replacer;
-pub mod disk_manager;
-pub mod disk_scheduler;
+pub(crate) mod clock_replacer;
+pub(crate) mod disk_manager;
+pub(crate) mod disk_scheduler;
 
 const DEFAULT_PAGE_SIZE: usize = 4096;
