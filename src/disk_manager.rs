@@ -179,6 +179,14 @@ impl DiskManager {
             .truncate(true)
             .open(pd)
     }
+
+    fn page_file_size(&self) -> u64 {
+        if let Some(file) = self.file_handle.as_ref() {
+            file.metadata().unwrap().len()
+        } else {
+            panic!("no file handle open")
+        }
+    }
 }
 
 mod tests {
@@ -235,6 +243,55 @@ mod tests {
         assert!(recv);
 
         assert_eq!(v_test, data);
+
+        drop(dm);
+        temp_dir.close().unwrap();
+    }
+
+    #[test]
+    fn test_disk_manager_on_disk_multi_page() {
+        let temp_dir = TempDir::new("test_disk_manager").unwrap();
+        let temp_file = temp_dir.path().join("test.db");
+        let (tx, rx) = std::sync::mpsc::channel();
+
+        let mut dm = DiskManager::new(DEFAULT_PAGE_SIZE, Some(temp_file), false);
+        assert_eq!(dm.page_size, DEFAULT_PAGE_SIZE);
+        assert!(!dm.in_memory);
+
+        // Create 10 pages on disk
+        for i in 1..11 {
+            let mut v_test: Vec<u8> = vec![0; DEFAULT_PAGE_SIZE];
+            dm.increase_pages(i);
+            dm.read_page(&mut v_test, i, tx.clone());
+
+            let recv = rx.recv().unwrap();
+
+            assert!(recv);
+            assert_eq!(v_test, vec![0; DEFAULT_PAGE_SIZE]);
+        }
+
+        assert_eq!(dm.page_file_size(), (DEFAULT_PAGE_SIZE * 10) as u64);
+
+        for i in 1..11 {
+            let mut v_test: Vec<u8> = "foo".as_bytes().to_vec();
+            dm.write_page(&mut v_test, i, tx.clone());
+            let recv = rx.recv().unwrap();
+            assert!(recv);
+        }
+
+        assert_eq!(dm.page_file_size(), (DEFAULT_PAGE_SIZE * 10) as u64);
+
+        for i in 1..11 {
+            let mut v_test: Vec<u8> = vec![0; DEFAULT_PAGE_SIZE];
+            dm.read_page(&mut v_test, i, tx.clone());
+            let recv = rx.recv().unwrap();
+            assert!(recv);
+
+            assert_eq!(
+                String::from_utf8(v_test).unwrap().trim_end_matches('\0'),
+                "foo"
+            );
+        }
 
         drop(dm);
         temp_dir.close().unwrap();
