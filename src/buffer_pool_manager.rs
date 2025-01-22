@@ -5,6 +5,15 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::sync::atomic::Ordering::Relaxed;
 use std::sync::atomic::{AtomicU64, AtomicUsize};
+use std::sync::{Arc, Mutex};
+
+struct ReadPage {
+    frame: Arc<Mutex<Frame>>,
+}
+
+struct WritePage {
+    frame: Arc<Mutex<Frame>>,
+}
 
 struct Frame {
     buffer: Vec<u8>,
@@ -66,9 +75,23 @@ impl BufferPoolManager {
         self.current_page_index.load(Relaxed)
     }
 
-    pub fn read() {}
+    pub fn read_page(&mut self) -> Option<ReadPage> {}
 
-    pub fn write() {}
+    pub fn write_page(&mut self) -> Option<WritePage> {
+        if let Some(frame_id) = self.check_page() {
+            let frame_ = &self.frames[frame_id];
+            let wrapped_frame = Arc::new(Mutex::new(frame_.clone()));
+            Some(WritePage {
+                frame: wrapped_frame,
+            })
+        }
+    }
+
+    /// check_page checks if the requests page
+    /// is already mapped to a frame. If it is not
+    /// eviction can occur and a frame will be freed
+    /// which then a new page will be brought in.  
+    fn check_page(&mut self) -> Option<usize> {}
 }
 
 mod tests {
