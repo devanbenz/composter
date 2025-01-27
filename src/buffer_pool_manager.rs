@@ -1,18 +1,51 @@
-use crate::clock_replacer::Replacer;
+use crate::clock_replacer::{Evictable, Replacer};
 use crate::disk_manager::DiskManager;
 use crate::disk_scheduler::DiskScheduler;
 use std::cmp::Ordering;
 use std::collections::HashMap;
+use std::io::Write;
+use std::pin::Pin;
 use std::sync::atomic::Ordering::Relaxed;
 use std::sync::atomic::{AtomicU64, AtomicUsize};
 use std::sync::{Arc, Mutex};
 
-struct ReadPage {
-    frame: Arc<Mutex<Frame>>,
+enum CheckedPage<'a> {
+    Read(ReadPage<'a>),
+    Write(WritePage<'a>),
 }
 
-struct WritePage {
-    frame: Arc<Mutex<Frame>>,
+struct ReadPage<'a> {
+    page_id: usize,
+    pinned: AtomicUsize,
+    frame: Arc<Mutex<&'a Frame>>,
+}
+
+struct WritePage<'a> {
+    page_id: usize,
+    pinned: AtomicUsize,
+    frame: Arc<Mutex<&'a mut Frame>>,
+}
+
+struct ReplacerNode {
+    frame_id: usize,
+    evictable: bool,
+}
+
+impl Evictable<ReplacerNode> for ReplacerNode {
+    fn new(id: usize) -> ReplacerNode {
+        ReplacerNode {
+            frame_id: id,
+            evictable: true,
+        }
+    }
+
+    fn pinned(&self) -> bool {
+        self.evictable
+    }
+
+    fn id(&self) -> usize {
+        todo!()
+    }
 }
 
 struct Frame {
@@ -37,7 +70,7 @@ struct BufferPoolManager {
     page_table: HashMap<usize, usize>,
     free_list: Vec<usize>,
     current_page_index: AtomicUsize,
-    replacer: Replacer<usize>,
+    replacer: Replacer<ReplacerNode>,
     frames: Vec<Frame>,
     page_size: usize,
 }
@@ -45,7 +78,7 @@ struct BufferPoolManager {
 impl BufferPoolManager {
     pub fn new(
         disk_scheduler: DiskScheduler,
-        replacer: Replacer<usize>,
+        replacer: Replacer<ReplacerNode>,
         page_size: usize,
         num_frames: usize,
     ) -> BufferPoolManager {
@@ -75,15 +108,31 @@ impl BufferPoolManager {
         self.current_page_index.load(Relaxed)
     }
 
-    pub fn read_page(&mut self) -> Option<ReadPage> {}
-
-    pub fn write_page(&mut self) -> Option<WritePage> {
-        if let Some(frame_id) = self.check_page() {
+    pub fn read_page(&mut self, page_id: usize) -> Option<ReadPage> {
+        if let Some(frame_id) = self.check_page(page_id) {
             let frame_ = &self.frames[frame_id];
-            let wrapped_frame = Arc::new(Mutex::new(frame_.clone()));
-            Some(WritePage {
+            let wrapped_frame = Arc::new(Mutex::new(frame_));
+            Some(ReadPage {
+                page_id,
+                pinned: AtomicUsize::new(1),
                 frame: wrapped_frame,
             })
+        } else {
+            None
+        }
+    }
+
+    pub fn write_page(&mut self, page_id: usize) -> Option<WritePage> {
+        if let Some(frame_id) = self.check_page(page_id) {
+            let frame_ = &mut self.frames[frame_id];
+            let wrapped_frame = Arc::new(Mutex::new(frame_));
+            Some(WritePage {
+                page_id,
+                pinned: AtomicUsize::new(1),
+                frame: wrapped_frame,
+            })
+        } else {
+            None
         }
     }
 
@@ -91,7 +140,23 @@ impl BufferPoolManager {
     /// is already mapped to a frame. If it is not
     /// eviction can occur and a frame will be freed
     /// which then a new page will be brought in.  
-    fn check_page(&mut self) -> Option<usize> {}
+    fn check_page(&mut self, page_id: usize) -> Option<usize> {
+        match self.page_table.get(&page_id) {
+            Some(frame_id) => Some(*frame_id),
+            None => {
+                let free_frame = self.free_list.pop();
+                if free_frame.is_some() {
+                    return free_frame;
+                }
+                let evicted_frame = self.replacer.insert_and_evict(page_id);
+                if let Some(item) = evicted_frame {
+                    self.free_list.push(item);
+                    self.page_table.remove(&page_id);
+                }
+                None
+            }
+        }
+    }
 }
 
 mod tests {
