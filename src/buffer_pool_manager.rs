@@ -2,7 +2,7 @@ use crate::clock_replacer::{Evictable, Replacer};
 use crate::disk_manager::DiskManager;
 use crate::disk_scheduler::DiskScheduler;
 use std::collections::HashMap;
-use std::io::{ErrorKind, Write};
+use std::io::{ErrorKind, Read, Write};
 use std::ops::{Deref, DerefMut};
 use std::sync::atomic::Ordering::Relaxed;
 use std::sync::atomic::{AtomicU64, AtomicUsize};
@@ -19,10 +19,17 @@ pub struct ReadPage<'a> {
     pub frame: Arc<Mutex<&'a Frame>>,
 }
 
-impl<'a> ReadPage<'a> {
-    pub fn read(&self) -> &'a [u8] {
+impl Read for ReadPage<'_> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         let frame = self.frame.lock();
-        frame.unwrap().buffer.deref()
+        match frame {
+            Ok(frame) => {
+                let frame_buf = &frame.buffer;
+                buf.copy_from_slice(frame_buf);
+                Ok(buf.len())
+            }
+            Err(err) => Err(std::io::Error::new(ErrorKind::Other, err.to_string())),
+        }
     }
 }
 
@@ -289,7 +296,10 @@ mod tests {
             frame: Arc::new(Mutex::new(&frame)),
         };
 
-        let buf = rp.read();
+        let mut buf = vec![0; 5];
+        let buf_read = rp.read(&mut buf);
+        assert!(buf_read.is_ok());
+        assert_eq!(buf_read.unwrap(), 5);
         assert_eq!(buf, vec![97, 97, 0, 0, 0]);
     }
 }
