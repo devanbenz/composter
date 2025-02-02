@@ -1,31 +1,52 @@
 use crate::clock_replacer::{Evictable, Replacer};
 use crate::disk_manager::DiskManager;
 use crate::disk_scheduler::DiskScheduler;
-use std::cmp::Ordering;
 use std::collections::HashMap;
-use std::io::Write;
-use std::pin::Pin;
+use std::io::{ErrorKind, Write};
+use std::ops::{Deref, DerefMut};
 use std::sync::atomic::Ordering::Relaxed;
 use std::sync::atomic::{AtomicU64, AtomicUsize};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, LockResult, Mutex, MutexGuard, PoisonError};
 
 enum CheckedPage<'a> {
     Read(ReadPage<'a>),
     Write(WritePage<'a>),
 }
 
-struct ReadPage<'a> {
-    page_id: usize,
-    pinned: AtomicUsize,
-    frame: Arc<Mutex<&'a Frame>>,
+pub struct ReadPage<'a> {
+    pub page_id: usize,
+    pub pinned: AtomicUsize,
+    pub frame: Arc<Mutex<&'a Frame>>,
 }
 
-struct WritePage<'a> {
-    page_id: usize,
-    pinned: AtomicUsize,
-    frame: Arc<Mutex<&'a mut Frame>>,
+impl<'a> ReadPage<'a> {
+    pub fn read(&self) -> &'a [u8] {
+        let frame = self.frame.lock();
+        frame.unwrap().buffer.deref()
+    }
 }
 
+pub struct WritePage<'a> {
+    pub page_id: usize,
+    pub pinned: AtomicUsize,
+    pub frame: Arc<Mutex<&'a mut Frame>>,
+}
+
+impl<'a> Write for WritePage<'a> {
+    fn write(&mut self, data: &[u8]) -> Result<usize, std::io::Error> {
+        let frame = &mut self.frame.lock();
+        match frame {
+            Ok(frame) => frame.write(data),
+            Err(err) => Err(std::io::Error::new(ErrorKind::Other, err.to_string())),
+        }
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        todo!()
+    }
+}
+
+#[derive(Clone)]
 struct ReplacerNode {
     frame_id: usize,
     evictable: bool,
@@ -44,14 +65,46 @@ impl Evictable<ReplacerNode> for ReplacerNode {
     }
 
     fn id(&self) -> usize {
-        todo!()
+        self.frame_id
     }
 }
 
-struct Frame {
-    buffer: Vec<u8>,
-    pin_count: AtomicU64,
-    current_page_index: Option<usize>,
+pub struct Frame {
+    pub buffer: Vec<u8>,
+    pub pin_count: AtomicU64,
+    pub current_page_index: Option<usize>,
+    pub page_size: usize,
+}
+
+impl Write for Frame {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        if buf.len() > self.page_size {
+            return Err(std::io::Error::new(
+                ErrorKind::OutOfMemory,
+                "buffer is too large",
+            ));
+        }
+        let curr_len = &self
+            .buffer
+            .iter()
+            .take_while(|x| *x != &0)
+            .collect::<Vec<_>>();
+        let curr_len = curr_len.len();
+        let total_len = curr_len + buf.len();
+        if total_len > self.page_size {
+            return Err(std::io::Error::new(
+                ErrorKind::OutOfMemory,
+                "buffer will exceed page size",
+            ));
+        }
+
+        self.buffer[curr_len..total_len].copy_from_slice(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        todo!()
+    }
 }
 
 impl Frame {
@@ -61,6 +114,7 @@ impl Frame {
             buffer,
             pin_count: AtomicU64::new(0),
             current_page_index: None,
+            page_size,
         }
     }
 }
@@ -150,7 +204,7 @@ impl BufferPoolManager {
                 }
                 let evicted_frame = self.replacer.insert_and_evict(page_id);
                 if let Some(item) = evicted_frame {
-                    self.free_list.push(item);
+                    self.free_list.push(item.id());
                     self.page_table.remove(&page_id);
                 }
                 None
@@ -194,5 +248,48 @@ mod tests {
             let np = buffer_pool_manager.new_page();
             assert_eq!(np, i);
         }
+    }
+
+    #[test]
+    fn test_frame_writer() {
+        let mut frame = Frame::new(5);
+        assert_eq!(vec![0, 0, 0, 0, 0], frame.buffer);
+        let val = frame.write(&[1, 2, 3]).unwrap();
+        assert_eq!(val, 3);
+        assert_eq!(vec![1, 2, 3, 0, 0], frame.buffer);
+        let val = frame.write(&[4]).unwrap();
+        assert_eq!(val, 1);
+        assert_eq!(vec![1, 2, 3, 4, 0], frame.buffer);
+        let val = frame.write(&[5]).unwrap();
+        assert_eq!(val, 1);
+        assert_eq!(vec![1, 2, 3, 4, 5], frame.buffer);
+        match frame.write(&[6]) {
+            Ok(val) => {}
+            Err(err) => {
+                assert_eq!(err.to_string(), "buffer will exceed page size");
+            }
+        }
+    }
+
+    #[test]
+    fn test_read_write_page_frame() {
+        let mut frame = Frame::new(5);
+        let mut wp = WritePage {
+            page_id: 1,
+            pinned: Default::default(),
+            frame: Arc::new(Mutex::new(&mut frame)),
+        };
+
+        let a = wp.write(&[97, 97]).unwrap();
+        assert_eq!(a, 2);
+
+        let mut rp = ReadPage {
+            page_id: 1,
+            pinned: Default::default(),
+            frame: Arc::new(Mutex::new(&frame)),
+        };
+
+        let buf = rp.read();
+        assert_eq!(buf, vec![97, 97, 0, 0, 0]);
     }
 }

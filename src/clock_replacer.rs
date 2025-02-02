@@ -21,8 +21,7 @@ where
 
 impl<T> Replacer<T>
 where
-    T: PartialEq<T> + Clone,
-    T: Evictable<T>,
+    T: Evictable<T> + Clone,
 {
     pub fn new(size: usize) -> Self {
         Self {
