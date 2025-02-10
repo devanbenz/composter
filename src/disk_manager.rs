@@ -1,6 +1,6 @@
 use crate::DEFAULT_PAGE_SIZE;
 use std::fs::{File, OpenOptions};
-use std::io::{BufRead, BufReader, BufWriter, Read, Seek, SeekFrom, Write};
+use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 use std::path::PathBuf;
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
@@ -120,7 +120,7 @@ impl DiskManager {
         }
     }
 
-    pub fn decrease_pages(&mut self, p_id: usize) {
+    pub fn decrease_pages(&mut self, _p_id: usize) {
         unimplemented!()
     }
 

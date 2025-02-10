@@ -6,6 +6,11 @@ pub trait Evictable<T> {
     fn id(&self) -> usize;
 }
 
+#[derive(Debug)]
+pub enum EvictionError {
+    NoFreeBuffer,
+}
+
 /// [Replacer] implements the page replacement policy.
 /// The eviction policy modeled here is similar to
 /// Postgres' CLOCK-sweep algorithm.
@@ -36,7 +41,7 @@ where
         self.size
     }
 
-    pub fn insert_and_evict(&mut self, node_id: usize) -> Option<T> {
+    pub fn insert_and_evict(&mut self, node_id: usize) -> Result<Option<T>, EvictionError> {
         let new_node = Some(T::new(node_id));
         for (i, page) in self.node_store.iter().enumerate() {
             match page {
@@ -44,20 +49,25 @@ where
                     if v.id() == node_id {
                         self.ref_pos = i;
                         self.ref_bits[i] += 1;
-                        return None;
+                        return Ok(None);
                     }
                 }
                 None => {
                     self.node_store[i] = new_node;
-                    return None;
+                    return Ok(None);
                 }
             };
         }
 
         loop {
             let curr_index = self.ref_pos % self.size;
+            if self.ref_pos >= self.size {
+                return Err(EvictionError::NoFreeBuffer);
+            }
+
             // Advances the reference pointer to the next possible index
             self.ref_pos = curr_index + 1;
+
             if self.ref_bits[curr_index] > 0 {
                 self.ref_bits[curr_index] -= 1;
             } else {
@@ -66,7 +76,7 @@ where
 
                 if !owned_node.pinned() {
                     let evicted = std::mem::replace(&mut self.node_store[curr_index], new_node);
-                    return evicted;
+                    return Ok(evicted);
                 }
             }
         }
@@ -96,11 +106,11 @@ mod tests {
 
         assert_eq!(p.size(), 5);
         // Inserting 5 elements in to Replacer
-        assert_eq!(p.insert_and_evict(3), None);
-        assert_eq!(p.insert_and_evict(4), None);
-        assert_eq!(p.insert_and_evict(5), None);
-        assert_eq!(p.insert_and_evict(6), None);
-        assert_eq!(p.insert_and_evict(7), None);
+        assert_eq!(p.insert_and_evict(3).unwrap(), None);
+        assert_eq!(p.insert_and_evict(4).unwrap(), None);
+        assert_eq!(p.insert_and_evict(5).unwrap(), None);
+        assert_eq!(p.insert_and_evict(6).unwrap(), None);
+        assert_eq!(p.insert_and_evict(7).unwrap(), None);
         assert_eq!(
             p.node_store,
             vec![Some(3), Some(4), Some(5), Some(6), Some(7)]
