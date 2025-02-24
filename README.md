@@ -1,4 +1,4 @@
-# Composer
+# Composter
 
 distributed buffer pool manager
 
