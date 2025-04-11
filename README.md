@@ -23,6 +23,8 @@ distributed buffer pool manager
     - nested objects
         - page replacer
         - disk scheduler
+
+TODO(?) 
 - Replication server
     - naive RAFT implementation
 
